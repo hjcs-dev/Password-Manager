@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Password Manager</title>
+    <style>
+        body {
+            background: linear-gradient(to bottom, #000000, #434343);
+            color: white;
+            font-family: Arial, sans-serif;
+            text-align: center;
+            margin: 0;
+            padding: 0;
+        }
+
+        .container {
+            max-width: 600px;
+            margin: 50px auto;
+            padding: 20px;
+            background: rgba(0, 0, 0, 0.7);
+            border-radius: 10px;
+        }
+
+        h1 {
+            margin-bottom: 20px;
+        }
+
+        .form-group {
+            margin-bottom: 15px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 5px;
+        }
+
+        input {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            background: #333;
+            color: white;
+        }
+
+        button {
+            padding: 10px 20px;
+            margin: 10px;
+            border: none;
+            border-radius: 5px;
+            background: #555;
+            color: white;
+            cursor: pointer;
+        }
+
+        button:hover {
+            background: #777;
+        }
+
+        #message {
+            margin-top: 20px;
+        }
+
+        #password-list {
+            margin-top: 20px;
+            text-align: left;
+        }
+
+        footer {
+            margin-top: 50px;
+            font-size: 0.8em;
+            color: #ccc;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Password Manager</h1>
+        <div class="form-group" id="setup-container" style="display:none;">
+            <label for="master-password-setup">Set Master Password:</label>
+            <input type="password" id="master-password-setup">
+            <button onclick="setupMasterPassword()">Set Password</button>
+        </div>
+        <div class="form-group" id="login-container">
+            <label for="master-password">Enter Master Password:</label>
+            <input type="password" id="master-password">
+            <button onclick="checkMasterPassword()">Login</button>
+        </div>
+        <div class="form-group" id="password-container" style="display:none;">
+            <label for="site">Enter Site URL:</label>
+            <input type="text" id="site" placeholder="e.g., https://example.com">
+            <label for="password">Enter Password:</label>
+            <input type="password" id="password">
+            <button onclick="addPassword()">Save Password</button>
+            <button onclick="listPasswords()">List Passwords</button>
+        </div>
+        <p id="message"></p>
+        <div id="password-list"></div>
+    </div>
+    <footer>
+        Image by wirestock
+    </footer>
+    <script>
+        async function generateKey() {
+            return crypto.subtle.generateKey(
+                { name: "AES-GCM", length: 256 },
+                true,
+                ["encrypt", "decrypt"]
+            );
+        }
+
+        async function exportKey(key) {
+            const exported = await crypto.subtle.exportKey("raw", key);
+            return btoa(String.fromCharCode(...new Uint8Array(exported)));
+        }
+
+        async function importKey(encoded) {
+            const binary = atob(encoded);
+            const array = new Uint8Array(binary.length);
+            for (let i = 0; i < binary.length; i++) {
+                array[i] = binary.charCodeAt(i);
+            }
+            return crypto.subtle.importKey(
+                "raw",
+                array,
+                "AES-GCM",
+                true,
+                ["encrypt", "decrypt"]
+            );
+        }
+
+        async function encryptData(data, key) {
+            const encoded = new TextEncoder().encode(data);
+            const iv = crypto.getRandomValues(new Uint8Array(12));
+            const encrypted = await crypto.subtle.encrypt(
+                { name: "AES-GCM", iv: iv },
+                key,
+                encoded
+            );
+            const buffer = new Uint8Array(encrypted);
+            const ivAndData = new Uint8Array(iv.byteLength + buffer.byteLength);
+            ivAndData.set(iv);
+            ivAndData.set(buffer, iv.byteLength);
+            return btoa(String.fromCharCode(...ivAndData));
+        }
+
+        async function decryptData(encrypted, key) {
+            const binary = atob(encrypted);
+            const ivAndData = new Uint8Array(binary.length);
+            for (let i = 0; i < binary.length; i++) {
+                ivAndData[i] = binary.charCodeAt(i);
+            }
+            const iv = ivAndData.slice(0, 12);
+            const data = ivAndData.slice(12);
+            const decrypted = await crypto.subtle.decrypt(
+                { name: "AES-GCM", iv: iv },
+                key,
+                data
+            );
+            return new TextDecoder().decode(decrypted);
+        }
+
+        function checkInitialSetup() {
+            if (!localStorage.getItem('masterPassword')) {
+                document.getElementById('setup-container').style.display = 'block';
+                document.getElementById('login-container').style.display = 'none';
+            } else {
+                document.getElementById('setup-container').style.display = 'none';
+                document.getElementById('login-container').style.display = 'block';
+            }
+        }
+
+        function setupMasterPassword() {
+            const masterPassword = document.getElementById('master-password-setup').value;
+            if (masterPassword) {
+                localStorage.setItem('masterPassword', masterPassword);
+                document.getElementById('message').innerText = "Master password set!";
+                document.getElementById('setup-container').style.display = 'none';
+                document.getElementById('login-container').style.display = 'block';
+            } else {
+                document.getElementById('message').innerText = "Please enter a master password.";
+            }
+        }
+
+        function checkMasterPassword() {
+            const masterPassword = document.getElementById('master-password').value;
+            if (masterPassword === localStorage.getItem('masterPassword')) {
+                document.getElementById('message').innerText = "Login successful!";
+                document.getElementById('login-container').style.display = 'none';
+                document.getElementById('password-container').style.display = 'block';
+            } else {
+                document.getElementById('message').innerText = "Incorrect master password.";
+            }
+        }
+
+        async function addPassword() {
+            const site = document.getElementById('site').value;
+            const password = document.getElementById('password').value;
+            if (!site || !password) {
+                document.getElementById('message').innerText = "Please enter the site URL and password.";
+                return;
+            }
+
+            let key;
+            if (localStorage.getItem('encryptionKey')) {
+                key = await importKey(localStorage.getItem('encryptionKey'));
+            } else {
+                key = await generateKey();
+                const exportedKey = await exportKey(key);
+                localStorage.setItem('encryptionKey', exportedKey);
+            }
+
+            const encryptedPassword = await encryptData(password, key);
+            let passwords = JSON.parse(localStorage.getItem('passwords')) || {};
+            passwords[site] = encryptedPassword;
+            localStorage.setItem('passwords', JSON.stringify(passwords));
+
+            document.getElementById('message').innerText = "Password saved and encrypted!";
+        }
+
+        async function listPasswords() {
+            if (!localStorage.getItem('encryptionKey')) {
+                document.getElementById('message').innerText = "No encryption key found.";
+                return;
+            }
+
+            const key = await importKey(localStorage.getItem('encryptionKey'));
+            const passwords = JSON.parse(localStorage.getItem('passwords')) || {};
+            const passwordList = document.getElementById('password-list');
+            passwordList.innerHTML = '';
+
+            for (let site in passwords) {
+                const encryptedPassword = passwords[site];
+                try {
+                    const decryptedPassword = await decryptData(encryptedPassword, key);
+                    const p = document.createElement('p');
+                    p.innerText = `${site}: ${decryptedPassword}`;
+                    passwordList.appendChild(p);
+                } catch (e) {
+                    const p = document.createElement('p');
+                    p.innerText = `${site}: Decryption error`;
+                    passwordList.appendChild(p);
+                }
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', checkInitialSetup);
+    </script>
+</body>
+</html>
